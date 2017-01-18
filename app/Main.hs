@@ -33,8 +33,8 @@ optParser :: Parser Options
 optParser = Options
         <$> strOption (long "input"   <> short 'i' <> metavar "DIRECTORY"  <> help "A directory containing images to flatten")
         <*> strOption (long "output"  <> short 'o' <> metavar "OUTPUT" <> help "File path to save result image to")
-        <*> switch    (long "combine" <> short 'c' <> help "Specifies that differences in photos should be combined")
-        <*> switch    (long "remove"    <> short 'r' <> help "Specifies that differences in photos should be removed")
+        <*> switch    (long "combine" <> short 'c' <> help "Specifies that differences in images should be combined")
+        <*> switch    (long "remove"    <> short 'r' <> help "Specifies that differences in images should be removed")
         <*> optional  (option auto (long "threshold" <> short 't' <> help "Adjust the sensitivity for detecting features. A low number is required to detect subtle differences eg a green jumper on grass. A high number will suffice for white stars against a black sky. Default is 10."))
         <*> optional  (option auto (long "quality"   <> short 'q' <> help "If output is a JPEG, this specifies the quality to use when saving"))
 

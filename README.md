@@ -19,9 +19,9 @@ Run `image-flatten` with various options:
       -h,--help                Show this help text
       -i,--input DIRECTORY     A directory containing images to flatten
       -o,--output OUTPUT       File path to save result image to
-      -c,--combine             Specifies that differences in photos should be
+      -c,--combine             Specifies that differences in images should be
                                combined
-      -r,--remove              Specifies that differences in photos should be
+      -r,--remove              Specifies that differences in images should be
                                removed
       -t,--threshold ARG       Adjust the sensitivity for detecting features. A low
                                number is required to detect subtle differences eg a
