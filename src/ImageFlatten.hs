@@ -1,4 +1,5 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module ImageFlatten
     (
@@ -8,32 +9,41 @@ module ImageFlatten
         flatten
     ) where
 
+import Codec.Picture
 import Data.Either
 import Data.Maybe
+import Data.Typeable
 import qualified Data.Vector.Unboxed as V
+import Control.Exception
 import Control.Monad
-import Control.Monad.Trans.Either
 import Control.Monad.IO.Class
 import qualified Data.ByteString as B
-import Codec.Picture hiding(readImage)
 import System.IO.Streams (InputStream, OutputStream)
 import qualified System.IO.Streams as Streams
 import System.Directory
-import Control.Exception
-import System.IO.Error
 import System.FilePath((</>))
 
 data InputSource = Directory FilePath
 data OutputDestination = JpgFile FilePath Int | PngFile FilePath
 data Operation = HideDifferences | CombineDifferences Float
+data FlattenException =
+    NotEnoughInputFilesException FilePath |
+    ImageLoadException FilePath |
+    CouldNotReadException FilePath deriving (Typeable)
 
-type ErrorIO a = EitherT String IO a
+instance Show FlattenException where
+    show (NotEnoughInputFilesException p) = p ++ " must contain 3 or more files"
+    show (ImageLoadException p)           = "could not load image " ++ p
+    show (CouldNotReadException p)        = "could not read " ++ p
+
+instance Exception FlattenException
+
 type PixelFunction = Pixel8 -> Int
 type AddPixel p = Int -> PixelRGB8 -> p -> p
 data ImageWithPath = ImageWithPath FilePath (Image PixelRGB8)
 
-flatten :: Operation -> InputSource -> OutputDestination -> IO (Either String ())
-flatten op i o = runEitherT $ do
+flatten :: Operation -> InputSource -> OutputDestination -> IO ()
+flatten op i o = do
     (nImages, (w, h), inputStream) <- createValidatedImageStream i
     let nPixels = w*h
         nImagesFloat = fromIntegral nImages
@@ -44,13 +54,13 @@ flatten op i o = runEitherT $ do
     (_,_,inputStream2)  <- createValidatedImageStream i
     resultImageData     <- performOperation op inputStream2 means variances nPixels
     let resultImage     = generateImageFromVector w h resultImageData
-    liftIO $ outputImage o (ImageRGB8 resultImage)
+    outputImage o (ImageRGB8 resultImage)
 
 calculateTotals :: Int -> PixelRGB8 -> (Float, Float, Float, Float, Float, Float) -> (Float, Float, Float, Float, Float, Float)
 calculateTotals _ px (rt, gt, bt, rst, gst, bst) = (r + rt, g + gt, b + bt, rst + r*r, gst + g*g, bst + b*b)
     where (r, g, b) = getFloatPixel px
 
-performOperation :: Operation -> InputStream (Either String (Image PixelRGB8)) -> V.Vector (Float, Float, Float) -> V.Vector Float -> Int -> ErrorIO (V.Vector (Float, Float, Float))
+performOperation :: Operation -> InputStream (Image PixelRGB8) -> V.Vector (Float, Float, Float) -> V.Vector Float -> Int -> IO (V.Vector (Float, Float, Float))
 performOperation HideDifferences i means variances nPixels = do
     totalImageData <- foldImageData (stripOutlierPixels means variances) (V.replicate nPixels (0,0,0,0)) i
     return $ V.map (\(r,g,b,t) -> let d = fromIntegral t in (r / d, g / d, b / d)) totalImageData
@@ -83,68 +93,40 @@ stripOutlierPixels means variances i px p@(rt, gt, bt, t)
         variance      = variances V.! i
         includeInMean = squareVector (r - ar) (g - ag) (b - ab) <= variance -- within 1 standard deviation
 
-createValidatedImageStream :: InputSource -> ErrorIO (Int, (Int, Int), InputStream (Either String (Image PixelRGB8)))
+createValidatedImageStream :: InputSource -> IO (Int, (Int, Int), InputStream (Image PixelRGB8))
 createValidatedImageStream i = do
-    (nImages, inputStream) <- getInputFileStream i
-    imageStream            <- liftIO $ Streams.map readImage inputStream
-    (Image w h _)          <- EitherT $ fromJust <$> Streams.peek imageStream -- fromJust is safe as imageStream has 3 or more values
-    s                      <- liftIO $ streamSequenceEither (validateImage w h) imageStream
-    return (nImages, (w, h), s)
+    (nImages, imageStream) <- getInputFileStream i
+    (Image w h _)          <- fromJust <$> Streams.peek imageStream -- fromJust is safe as imageStream has 3 or more values
+    return (nImages, (w, h), imageStream)
 
 -- |Folds the given AddPixel function over a stream of Images, accumulating the data into a vector
-foldImageData :: (V.Unbox p) => AddPixel p -> V.Vector p -> InputStream (Either String (Image PixelRGB8)) -> ErrorIO (V.Vector p)
-foldImageData f = foldUntilError accumPixels where
+-- TODO check all images are of an equal size
+foldImageData :: (V.Unbox p) => AddPixel p -> V.Vector p -> InputStream (Image PixelRGB8) -> IO (V.Vector p)
+foldImageData f a = Streams.fold accumPixels a where
     accumPixels v img@(Image w h imgData) = V.imap (\i p -> f i (pixelAt img (indexToX w i) (indexToY w i)) p) v
     indexToX w i = i `mod` w
     indexToY w i = i `div` w
-
-validateImage :: Int -> Int -> Image PixelRGB8 -> Either String (Image PixelRGB8)
-validateImage w h i@(Image w' h' _)
-    | w == w' && h == h' = Right i
-    | otherwise          = Left "Images must all have the same dimensions"
 
 outputImage :: OutputDestination -> DynamicImage -> IO ()
 outputImage (JpgFile path quality) = saveJpgImage quality path
 outputImage (PngFile path)         = savePngImage path
 
-getInputFileStream :: InputSource -> ErrorIO (Int, InputStream (FilePath, B.ByteString))
+getInputFileStream :: InputSource -> IO (Int, InputStream (Image PixelRGB8))
 getInputFileStream (Directory dir) = do
-    names <- liftIOSafeWithMessage formatlistDirectoryError (listDirectory dir)
+    names <- listDirectory dir `catch` \(ex :: IOException) -> throwIO $ CouldNotReadException dir
     let nImages = length names
-    when (nImages < 3) (left $ dir ++ " must contain 3 or more files")
+    when (nImages < 3) (throwIO $ NotEnoughInputFilesException dir)
     let paths = fmap (dir </>) names
-    stream <- liftIO $ Streams.fromList paths >>= Streams.mapM (\p -> B.readFile p >>= (\b -> return (p, b)))
+    stream <- Streams.fromList paths >>= Streams.mapM readImageE
     return (nImages, stream)
-        where
-        formatlistDirectoryError e = if isDoesNotExistError e
-            then dir ++ " does not exist"
-            else displayException e
+    where readImageE p = readImage p >>= either (\_ -> throwIO $ ImageLoadException p) (return . convertRGB8)
 
 generateImageFromVector :: Int -> Int -> V.Vector (Float, Float, Float) -> Image PixelRGB8
 generateImageFromVector w h v = generateImage getPixel w h where
     getPixel x y = let (r,g,b) = v V.! (x + y*w) in PixelRGB8 (round r) (round g) (round b)
 
-readImage :: (FilePath, B.ByteString) -> Either String (Image PixelRGB8)
-readImage (path, bs) = either (Left . formatError) (Right . convertRGB8) (decodeImage bs) where
-    formatError e = path ++ ": " ++ e
-
 addTuples :: Num a => (a, a, a) -> (a, a, a) -> (a, a, a)
 addTuples (a, b, c) (a', b', c') = (a + a', b + b', c + c')
-
--- |Fold an input stream of 'Eithers' producing a result in the ErrorIO monad
-foldUntilError :: (s -> a -> s) -> s -> InputStream (Either String a) -> ErrorIO s
-foldUntilError f seed stream = EitherT $ go seed
-    where
-        go !s = Streams.read stream >>= \v -> case v of
-            Just (Right v') -> go $ f s v'
-            Just (Left  v') -> return $ Left v'
-            Nothing         -> return $ Right s
-
--- |Map a function producing Eithers over an input stream of eithers
-streamSequenceEither :: (a -> Either e b) -> InputStream (Either e a) -> IO (InputStream (Either e b))
-streamSequenceEither f = Streams.map f' where
-    f' (Right v) = f v
-    f' (Left e)  = Left e
 
 getFloatPixel :: PixelRGB8 -> (Float, Float, Float)
 getFloatPixel (PixelRGB8 r g b) = (fromIntegral r, fromIntegral g, fromIntegral b)
@@ -157,6 +139,3 @@ squareVector a b c = a*a + b*b + c*c
 
 mapTup6 :: (a -> b) -> (a, a, a, a, a, a) -> (b, b, b, b, b, b)
 mapTup6 g (a, b, c, d, e, f) = (g a, g b, g c, g d, g e, g f)
-
-liftIOSafeWithMessage :: (IOException -> String) -> IO a -> ErrorIO a
-liftIOSafeWithMessage getErrorMessage a = EitherT $ catch (Right <$> a) (return . Left . getErrorMessage)

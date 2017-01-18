@@ -3,12 +3,10 @@ module Main where
 import ImageFlatten
 import Data.Maybe
 import Data.Char
-import Control.Monad.Trans.Either
 import Options.Applicative
 import System.IO
 import System.Environment
 import System.FilePath
-import Control.Monad.IO.Class
 
 data Options = Options
     { input    :: String,
@@ -19,12 +17,12 @@ data Options = Options
       quality :: Maybe Int } deriving (Show)
 
 main :: IO ()
-main = eitherT (hPutStrLn stderr) (const $ return ()) go
- where
-    go = do
-        opt <- liftIO $ execParser $ info (helper <*> optParser) description
-        (op, inp, out) <- hoistEither $ validateOptions opt
-        EitherT $ flatten op inp out
+main = do
+    opt <- execParser $ info (helper <*> optParser) description
+    let validated = validateOptions opt
+    case validated of
+        Left e               -> hPutStrLn stderr e
+        Right (op, inp, out) -> flatten op inp out
 
 description :: InfoMod Options
 description = fullDesc
