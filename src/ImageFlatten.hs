@@ -5,7 +5,7 @@ module ImageFlatten
     (
         InputSource(Directory),
         OutputDestination(JpgFile, PngFile),
-        Operation(HideDifferences,CombineDifferences),
+        Operation(HideDifferences,CombineDifferences, Average),
         flatten
     ) where
 
@@ -24,7 +24,7 @@ import System.FilePath((</>))
 
 data InputSource = Directory FilePath
 data OutputDestination = JpgFile FilePath Int | PngFile FilePath
-data Operation = HideDifferences | CombineDifferences Float
+data Operation = HideDifferences | CombineDifferences Float | Average
 data FlattenException =
     NotEnoughInputFilesException FilePath |
     ImageLoadException FilePath |
@@ -66,6 +66,7 @@ calculateTotals _ px (rt, gt, bt, rst, gst, bst) = (r + rt, g + gt, b + bt, rst 
     where (r, g, b) = getFloatPixel px
 
 performOperation :: Int -> Int -> Operation -> ImageStream -> V.Vector (Float, Float, Float) -> V.Vector Float -> Int -> IO (V.Vector (Float, Float, Float))
+performOperation _ _ Average _ means _ _ = return means
 performOperation w h HideDifferences i means variances nPixels = do
     totalImageData <- foldImageData w h (stripOutlierPixels means variances) (V.replicate nPixels (0,0,0,0)) i
     return $ V.map (\(r,g,b,t) -> let d = fromIntegral t in (r / d, g / d, b / d)) totalImageData

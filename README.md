@@ -12,7 +12,8 @@ Run `image-flatten` with various options:
     differences
 
     Usage: image-flatten (-i|--input DIRECTORY) (-o|--output OUTPUT) [-c|--combine]
-                         [-r|--remove] [-t|--threshold ARG] [-q|--quality ARG]
+                         [-r|--remove] [-a|--average] [-t|--threshold ARG]
+                         [-q|--quality ARG]
       Flatten DIRECTORY into OUTPUT
 
     Available options:
@@ -23,6 +24,7 @@ Run `image-flatten` with various options:
                                combined
       -r,--remove              Specifies that differences in images should be
                                removed
+      -a,--average             Specifies that images should be averaged
       -t,--threshold ARG       Adjust the sensitivity for detecting features. A low
                                number is required to detect subtle differences eg a
                                green jumper on grass. A high number will suffice for
