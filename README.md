@@ -1,4 +1,20 @@
-A tool for flattening multiple slightly different images into a single image. There are two modes. The first is to remove variations for example if you take 10 identical picture of a landscape as a person walked across it, the program would attempt to remove the person, resulting in an image that only showed the landscape. The second mode is to combine all variations between pictures - in the previous example this would produce an image that contained the landscape as well as 10 copies of the person.
+A tool for flattening multiple images into a single image. There are three modes: the first removes differences, the second combines differences and the third averages them.
+
+These three images of an overly colourful futon can be combined using the three different modes
+
+![Alt text](/example/input/bear1.jpg?raw=true)
+![Alt text](/example/input/bear2.jpg?raw=true)
+![Alt text](/example/input/bear3.jpg?raw=true)
+
+Using 'remove' mode `image-flatten -r -i example/input -o example/remove.jpg`:
+![Alt text](/example/remove.jpg?raw=true)
+
+Using 'combine' mode `image-flatten -c -i example/input -o example/combine.jpg`:
+![Alt text](/example/combine.jpg?raw=true)
+
+Using 'average' mode `image-flatten -a -i example/input -o example/average.jpg`:
+![Alt text](/example/average.jpg?raw=true)
+
 
 # Build
 
